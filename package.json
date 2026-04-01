@@ -1,7 +1,7 @@
 {
   "name": "@theyahia/2gis-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for 2GIS API — places, geocoding, directions, reviews for AI agents",
+  "version": "1.0.1",
+  "description": "MCP server for 2GIS — places, geocoding, directions, reviews (Russia)",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -43,7 +43,8 @@
     "maps",
     "geocoding",
     "places",
-    "typescript"
+    "typescript",
+    "api"
   ],
   "license": "MIT",
   "repository": {
