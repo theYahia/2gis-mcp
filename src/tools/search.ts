@@ -6,29 +6,58 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { searchItems, getItem, searchByRubric } from "../client.js";
 import { success, error } from "../lib/formatters.js";
+import { formatPlaceSummary, formatPlaceDetail } from "../lib/extract.js";
+import { FIELDS } from "../lib/fields.js";
+import { parsePoint } from "../lib/coords.js";
 import type { SearchResponse } from "../types.js";
 
+const READ_ONLY = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
+const pointSchema = z.string().refine((v) => parsePoint(v) !== null, {
+  message:
+    "point must be 'lon,lat' with lon in [-180,180] and lat in [-90,90] (longitude FIRST — not lat,lon)",
+});
+
 export function registerSearchTools(server: McpServer): void {
-  server.tool(
+  server.registerTool(
     "search_places",
-    "Search for places, businesses, and points of interest in 2GIS.",
     {
-      query: z.string().min(1).max(200).describe("Search query (e.g. 'кофейня', 'аптека рядом')"),
-      point: z.string().regex(/^-?\d+\.?\d*,-?\d+\.?\d*$/).optional()
-        .describe("Center point as 'lon,lat' for spatial search"),
-      radius: z.number().int().min(100).max(50000).default(5000)
-        .describe("Search radius in meters"),
-      type: z.enum(["building", "street", "branch", "org", "adm_div"]).optional()
-        .describe("Filter by item type"),
-      fields: z.string().optional()
-        .describe("Additional fields: items.point,items.address,items.contact_groups,items.schedule,items.reviews"),
-      page_size: z.number().int().min(1).max(50).default(10).describe("Results per page"),
+      title: "Search places",
+      description:
+        "Search for places, businesses and points of interest in 2GIS (Russia/CIS). Returns items with ids you can pass to get_place / get_reviews, and rubric ids you can pass to search_by_rubric.",
+      inputSchema: {
+        query: z.string().min(1).max(200).describe("Search query (e.g. 'кофейня', 'аптека рядом')"),
+        point: pointSchema
+          .optional()
+          .describe("Center point as 'lon,lat' (longitude first) for spatial search"),
+        radius: z
+          .number()
+          .int()
+          .min(100)
+          .max(40000)
+          .default(5000)
+          .describe("Search radius in meters (max 40000 with a query)"),
+        type: z
+          .enum(["branch", "building", "street", "parking", "station", "attraction", "adm_div"])
+          .optional()
+          .describe("Filter by item type ('branch' = company/POI)"),
+        page: z.number().int().min(1).max(1000).default(1).describe("Page number (1-based)"),
+        page_size: z.number().int().min(1).max(50).default(10).describe("Results per page (max 50)"),
+        fields: z.string().optional().describe("Override returned fields (advanced)"),
+      },
+      annotations: READ_ONLY,
     },
     async (params) => {
       const searchParams: Record<string, string> = {
         q: params.query,
+        page: String(params.page),
         page_size: String(params.page_size),
-        fields: params.fields || "items.point,items.address,items.contact_groups,items.rubrics",
+        fields: params.fields || FIELDS.SEARCH,
       };
       if (params.point) {
         searchParams.point = params.point;
@@ -40,102 +69,78 @@ export function registerSearchTools(server: McpServer): void {
       if (result.error) return error(result.error);
 
       const resp = result.data as SearchResponse;
-      if (!resp.result?.items?.length) {
+      if (!resp?.result?.items?.length) {
         return success({ status: "no_results", message: `No places found for "${params.query}".` });
       }
 
       return success({
         total: resp.result.total,
-        items: resp.result.items.map((item) => ({
-          id: item.id,
-          name: item.name,
-          full_name: item.full_name,
-          type: item.type,
-          address: item.address_name,
-          point: item.point,
-          rubrics: item.rubrics?.map((r) => r.name),
-          phones: item.contact_groups?.flatMap((g) =>
-            g.contacts.filter((c) => c.type === "phone").map((c) => c.value)
-          ),
-          rating: item.reviews?.general_rating,
-          review_count: item.reviews?.general_review_count,
-        })),
+        page: params.page,
+        page_size: params.page_size,
+        items: resp.result.items.map(formatPlaceSummary),
       });
     },
   );
 
-  server.tool(
+  server.registerTool(
     "get_place",
-    "Get detailed information about a specific place by its 2GIS ID.",
     {
-      place_id: z.string().min(1).describe("2GIS place/branch ID"),
-      fields: z.string().default("items.point,items.address,items.contact_groups,items.schedule,items.reviews,items.rubrics,items.external_content")
-        .describe("Fields to retrieve"),
+      title: "Get place details",
+      description:
+        "Get detailed information about a specific place by its 2GIS ID. Obtain the id from search_places first.",
+      inputSchema: {
+        place_id: z.string().min(1).describe("2GIS place/branch ID (from search_places)"),
+        fields: z.string().default(FIELDS.PLACE_DETAIL).describe("Fields to retrieve"),
+      },
+      annotations: READ_ONLY,
     },
     async (params) => {
       const result = await getItem(params.place_id, params.fields);
       if (result.error) return error(result.error);
 
       const resp = result.data as SearchResponse;
-      const item = resp.result?.items?.[0];
+      const item = resp?.result?.items?.[0];
       if (!item) {
         return success({ status: "not_found", message: `Place ${params.place_id} not found.` });
       }
 
-      return success({
-        id: item.id,
-        name: item.name,
-        full_name: item.full_name,
-        type: item.type,
-        address: item.address_name,
-        point: item.point,
-        rubrics: item.rubrics?.map((r) => r.name),
-        schedule: item.schedule,
-        phones: item.contact_groups?.flatMap((g) =>
-          g.contacts.filter((c) => c.type === "phone").map((c) => c.value)
-        ),
-        websites: item.contact_groups?.flatMap((g) =>
-          g.contacts.filter((c) => c.type === "website").map((c) => c.value)
-        ),
-        rating: item.reviews?.general_rating,
-        review_count: item.reviews?.general_review_count,
-        photos: item.external_content
-          ?.filter((e) => e.type === "photo")
-          .map((e) => ({ count: e.count, main_url: e.main_photo_url })),
-      });
+      return success(formatPlaceDetail(item));
     },
   );
 
-  server.tool(
+  server.registerTool(
     "search_by_rubric",
-    "Search places by rubric (category) ID near a location.",
     {
-      rubric_id: z.string().min(1).describe("2GIS rubric ID"),
-      point: z.string().regex(/^-?\d+\.?\d*,-?\d+\.?\d*$/)
-        .describe("Center point as 'lon,lat'"),
-      radius: z.number().int().min(100).max(50000).default(5000)
-        .describe("Search radius in meters"),
+      title: "Search by rubric",
+      description:
+        "Search places by rubric (category) ID near a location. Get a rubric_id from the 'rubrics' field of search_places results, or read the 2gis://rubrics resource.",
+      inputSchema: {
+        rubric_id: z.string().min(1).describe("2GIS rubric (category) ID"),
+        point: pointSchema.describe("Center point as 'lon,lat' (longitude first)"),
+        radius: z
+          .number()
+          .int()
+          .min(100)
+          .max(2000)
+          .default(1500)
+          .describe("Search radius in meters (max 2000 without a text query)"),
+        page: z.number().int().min(1).max(1000).default(1).describe("Page number (1-based)"),
+      },
+      annotations: READ_ONLY,
     },
     async (params) => {
-      const result = await searchByRubric(params.rubric_id, params.point, params.radius);
+      const result = await searchByRubric(params.rubric_id, params.point, params.radius, params.page);
       if (result.error) return error(result.error);
 
       const resp = result.data as SearchResponse;
-      if (!resp.result?.items?.length) {
+      if (!resp?.result?.items?.length) {
         return success({ status: "no_results", message: `No places found for rubric ${params.rubric_id}.` });
       }
 
       return success({
         total: resp.result.total,
-        items: resp.result.items.map((item) => ({
-          id: item.id,
-          name: item.name,
-          address: item.address_name,
-          point: item.point,
-          phones: item.contact_groups?.flatMap((g) =>
-            g.contacts.filter((c) => c.type === "phone").map((c) => c.value)
-          ),
-        })),
+        page: params.page,
+        items: resp.result.items.map(formatPlaceSummary),
       });
     },
   );
