@@ -1,3 +1,17 @@
+> ## 🗄 Репозиторий заархивирован
+>
+> Разработка переехала в **[theYahia/WWmcp](https://github.com/theYahia/WWmcp)** — монорепозиторий MCP-серверов для незападных API: СНГ, MENA, Африка, LATAM, Юго-Восточная Азия. Общее ядро `@theyahia/mcp-core`, единый CI, единый релизный конвейер.
+>
+> Актуальная версия того, что лежало здесь: [`servers/2gis/`](https://github.com/theYahia/WWmcp/tree/main/servers/2gis)
+>
+> Пакет в npm прежний — [`@theyahia/2gis-mcp`](https://www.npmjs.com/package/@theyahia/2gis-mcp), ставится и работает как раньше.
+> Здесь больше ничего не обновляется. Задачи и pull request'ы — в WWmcp.
+>
+> **Archived — development moved to [theYahia/WWmcp](https://github.com/theYahia/WWmcp),** a monorepo of MCP servers for non-Western APIs.
+> The current version of this package now lives at [`servers/2gis/`](https://github.com/theYahia/WWmcp/tree/main/servers/2gis).
+> The npm package [`@theyahia/2gis-mcp`](https://www.npmjs.com/package/@theyahia/2gis-mcp) is unchanged.
+> Please open issues and pull requests there.
+
 # @theyahia/2gis-mcp
 
 MCP server for the **2GIS API** — places search, geocoding, directions, public
